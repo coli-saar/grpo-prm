@@ -72,7 +72,7 @@ class LambdaGRPOTrainer:
         self.model.eval()
 
         targets, qrr = (([None] * len(prompts)) if targets is None else targets), []
-        gk = {**{'do_sample': False}, **self.generation_kwargs}
+        gk = {**self.generation_kwargs, **{'do_sample': False}}
         tqdm_ = tqdm if use_tqdm else identity
 
         for i in tqdm_(range(-(-len(prompts) // batch_size))):
