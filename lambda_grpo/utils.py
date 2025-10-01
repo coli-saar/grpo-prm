@@ -67,7 +67,12 @@ class InfPRMTree:
 
 
 class InfPRMNode:
-    def __init__(self, content, idx=None, dtrs=None):
+    def __init__(
+            self,
+            content: List[Optional[int]],
+            idx: Optional[List[int]] = None,
+            dtrs: Optional[List["InfPRMNode"]] = None
+    ):
         self._len, self.dtrs = sum((1 for x in content if x is not None), start=0), dtrs
 
         if self.terminal:

@@ -13,7 +13,6 @@ from transformers import PreTrainedModel, PreTrainedTokenizer, DataCollatorForLa
 _sample_rtn_type = Tuple[
     List[torch.Tensor],
     List[torch.Tensor],
-    List[torch.Tensor],
     List[float],
     List[torch.Tensor],
     List[torch.Tensor],
@@ -96,7 +95,7 @@ class LambdaGRPOTrainer:
             targets: Optional[List[Any]] = None,
             use_tqdm: bool = True
     ) -> Dict[str, Union[List[Tuple[str, float]], float]]:
-        advs, input_ids, completions, rewards, *step_args = self._sample(prompts, targets, use_tqdm)
+        advs, input_ids, rewards, *step_args = self._sample(prompts, targets, use_tqdm)
         loss_scales = []
 
         for i in range(len(input_ids) // self.group_size):  # group size
@@ -118,14 +117,15 @@ class LambdaGRPOTrainer:
             loss += self._step(*step_args, base_logits=base_logits)
 
         return {
-            'qrr': list(zip((self.tokenizer.decode(c.flatten()) for c in completions), rewards)),
+            # 'qrr': list(zip((self.tokenizer.decode(c.flatten()) for c in completions), rewards)),
+            'qrr': list(zip((self.tokenizer.decode(c.flatten()) for c in input_ids), rewards)),
             'loss': loss / self.batch_steps
         }
 
     def _sample(
             self, prompts: List[str], targets: Optional[List[Any]], use_tqdm: bool
     ) -> _sample_rtn_type:
-        completions, advs, input_ids, attn_masks, n_logits, ref_logits = [], [], [], [], [], []
+        advs, input_ids, attn_masks, n_logits, ref_logits = [], [], [], [], []
         rewards, k = [[] for _ in range(len(prompts))], 0
         prompt_targets = [
             x for x in (((p_, None) for p_ in prompts) if targets is None else zip(prompts, targets, strict=True))
@@ -138,7 +138,7 @@ class LambdaGRPOTrainer:
             for i in tqdm_(range(len(prompt_targets) // self.generation_batch_size)):
                 batch_pt = prompt_targets[i * self.generation_batch_size:(i + 1) * self.generation_batch_size]
                 p_input = self._build_prompts([p for p, _ in batch_pt])
-                n_logits_step = [(x != self.tokenizer.pad_token_id).sum().item() for x in p_input]
+                n_logits_step = [(x != self.tokenizer.pad_token_id).sum().item() for x in p_input['input_ids']]
                 input_ids_step, attn_masks_step = [], []
 
                 with set_batch_size(self.model, len(batch_pt)):
@@ -147,12 +147,10 @@ class LambdaGRPOTrainer:
                     )
 
                 for (p, t), y in zip(batch_pt, model_out):
-                    completions.append(y[y != self.tokenizer.pad_token_id].unsqueeze(0))
-                    rewards[k // self.group_size].append(self.reward_fn(completions[-1], t).flatten())
+                    input_ids_step.append(y[y != self.tokenizer.pad_token_id].flatten())
+                    attn_masks_step.append(torch.ones_like(input_ids_step[-1]))
+                    rewards[k // self.group_size].append(self.reward_fn(input_ids_step[-1].unsqueeze(0), t).flatten())
                     k += 1
-
-                    input_ids_step.append(completions[-1].flatten())
-                    attn_masks_step.append(attn_masks_step.append(torch.ones_like(input_ids_step[-1])))
 
                 max_len = max(x.size(-1) for x in input_ids_step)
                 input_data_step = {
@@ -173,12 +171,19 @@ class LambdaGRPOTrainer:
             k = 0
 
             for i, r_g in enumerate(rewards):
-                r_g, rewards[i] = (torch.stack(r_g, dim=0),) * 2
+                r_g, rewards[i] = (torch.cat(r_g, dim=0),) * 2
                 r_mean, r_std = r_g.mean(dim=0), r_g.std(dim=0) + 1e-4
-                advs.extend(torch.full_like(ref_logits[k + j], (r - r_mean) / r_std) for j, r in enumerate(r_g))
-                k += r_g.size(-1)
 
-        return advs, input_ids, completions, torch.stack(rewards, dim=0).tolist(), attn_masks, ref_logits, n_logits
+                for r in r_g:
+                    adv_k = torch.full(
+                        (1, input_ids[k].size(-1) - n_logits[k]),
+                        ((r - r_mean) / r_std).item(),
+                        device=input_ids[k].device
+                    )
+                    advs.append(adv_k)
+                    k += 1
+
+        return advs, input_ids, torch.cat(rewards, dim=0).tolist(), attn_masks, ref_logits, n_logits
 
     def _step(
             self,
