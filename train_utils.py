@@ -89,17 +89,13 @@ def validate_and_checkpoint(
         val_prompts: List[str],
         val_answers: List[str],
         generation_batch_size: int,
-        max_new_tokens: int,
         save_fp: Optional[str],
         step: int = -1,
         idxs: Optional[List[str]] = None,
         del_opt: bool = False
 ) -> None:
     stats['epochs'][-1]['validation'].append(trainer.validate(
-        val_prompts,
-        targets=val_answers,
-        batch_size=generation_batch_size,
-        generation_kwargs={'max_new_tokens': max_new_tokens}
+        val_prompts, targets=val_answers, batch_size=generation_batch_size,
     ))
     print_qrr(stats['epochs'][-1]['validation'][-1])
 
