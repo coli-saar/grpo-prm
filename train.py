@@ -172,7 +172,6 @@ for e in range(max_ep, args.epochs):  # training loop
                 val_prompts,
                 val_answers,
                 args.generation_batch_size,
-                args.max_new_tokens,
                 save_fp,
                 step=s,
                 del_opt=True
@@ -191,7 +190,6 @@ for e in range(max_ep, args.epochs):  # training loop
             val_prompts,
             val_answers,
             args.generation_batch_size,
-            args.max_new_tokens,
             save_fp,
             idxs=train_indices,
             del_opt=True
